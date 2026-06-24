@@ -2242,6 +2242,7 @@ async def register_model(
     needs: Optional[List[List[WorkerType]]] = None,
     self_host_metadata: Optional[bool] = None,
     ignore_weights: bool = False,
+    model_aliases: Optional[List[str]] = None,
 ) -> None:
     """
     Attach the model at path to the given endpoint, and advertise it as model_type.

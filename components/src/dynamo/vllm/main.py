@@ -165,7 +165,8 @@ async def worker(argv: list[str] | None = None) -> None:
     # Name the model. Use either the full path (vllm and sglang do the same),
     # or the HF name (e.g. "Qwen/Qwen3-0.6B"), depending on cmd line params.
     if not config.served_model_name:
-        config.served_model_name = config.engine_args.served_model_name = config.model
+        config.served_model_name = config.model
+        config.engine_args.served_model_name = [config.model]
 
     configure_rl_logprobs_mode(config)
 
@@ -800,6 +801,7 @@ async def register_vllm_model(
         worker_type=worker_type,
         needs=needs,
         ignore_weights=should_register_model_ignore_weights(config),
+        model_aliases=config.served_model_aliases or None,
     )
 
 

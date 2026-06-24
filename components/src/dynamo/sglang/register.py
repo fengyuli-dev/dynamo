@@ -132,6 +132,7 @@ async def _register_model_with_runtime_config(
     if getattr(dynamo_args, "frontend_decoding", False):
         media_decoder, media_fetcher = _build_media_decoder_and_fetcher()
 
+    aliases = list(getattr(dynamo_args, "served_model_aliases", []) or [])
     try:
         await register_model(
             input_type,
@@ -147,8 +148,15 @@ async def _register_model_with_runtime_config(
             worker_type=worker_type,
             needs=needs,
             ignore_weights=use_modelexpress_remote_instance(server_args),
+            model_aliases=aliases or None,
         )
-        logging.info("Successfully registered LLM with runtime config")
+        if aliases:
+            logging.info(
+                "Successfully registered LLM with runtime config (aliases: %s)",
+                aliases,
+            )
+        else:
+            logging.info("Successfully registered LLM with runtime config")
         return True
     except Exception as e:
         logging.error(f"Failed to register with runtime config: {e}")
