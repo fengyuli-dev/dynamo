@@ -130,6 +130,16 @@ impl NvCreateChatCompletionRequest {
     /// Normalize OpenAI-style DS-V4 reasoning controls into the template kwargs
     /// consumed by the SGLang/DeepSeek-V4 prompt formatter.
     pub fn normalize_reasoning_template_args(&mut self) -> anyhow::Result<()> {
+        self.normalize_reasoning_template_args_with_default(default_thinking_off_enabled())
+    }
+
+    /// Inner form of [`Self::normalize_reasoning_template_args`] taking the
+    /// server-side default-off decision explicitly, so the injection logic can
+    /// be unit-tested without touching process env.
+    fn normalize_reasoning_template_args_with_default(
+        &mut self,
+        default_thinking_off: bool,
+    ) -> anyhow::Result<()> {
         let thinking_enabled = self
             .thinking
             .as_ref()
@@ -142,25 +152,78 @@ impl NvCreateChatCompletionRequest {
             .as_ref()
             .and_then(|effort| serde_json::to_value(effort).ok());
 
-        if thinking_enabled.is_none() && reasoning_effort.is_none() {
-            return Ok(());
+        if thinking_enabled.is_some() || reasoning_effort.is_some() {
+            let args = self.chat_template_args.get_or_insert_with(HashMap::new);
+            if let Some(enabled) = thinking_enabled {
+                args.entry("thinking".to_string())
+                    .or_insert(serde_json::Value::Bool(enabled));
+            }
+            if let Some(effort) = reasoning_effort {
+                args.entry("reasoning_effort".to_string()).or_insert(effort);
+            }
+
+            // The raw `thinking` payload has been folded into `chat_template_args`;
+            // drop it so it isn't double-shipped downstream (and so it can't be
+            // re-interpreted with different precedence by the worker preprocessor).
+            self.thinking = None;
         }
 
-        let args = self.chat_template_args.get_or_insert_with(HashMap::new);
-        if let Some(enabled) = thinking_enabled {
-            args.entry("thinking".to_string())
-                .or_insert(serde_json::Value::Bool(enabled));
+        // Server-side default-off (DYN_DEFAULT_THINKING=false/off/0). Some models'
+        // Dynamo prompt formatter defaults thinking ON — e.g. DeepSeek-V4's native
+        // Rust formatter (`resolve_thinking_mode`: "deepseek_v4 + no args → enabled").
+        // Plain SGLang defaults the same model OFF (`SGLANG_DEFAULT_THINKING=false`
+        // + the `explicit_thinking` reasoning default), so a Dynamo deployment that
+        // mirrors plain-SGLang traffic over-generates on every request that carries
+        // no `chat_template_kwargs` (e.g. shadow/mirror traffic, which cannot). When
+        // the operator opts in and the request expressed no thinking preference,
+        // inject `thinking_mode: "chat"` — `chat_template_args` feeds both the prompt
+        // formatter and the reasoning-parser disable check, so prompt and parser stay
+        // in sync. A client can still opt back in per-request via
+        // `chat_template_kwargs`/`thinking`.
+        if default_thinking_off && !self.has_explicit_thinking_signal() {
+            let args = self.chat_template_args.get_or_insert_with(HashMap::new);
+            args.insert(
+                "thinking_mode".to_string(),
+                serde_json::Value::String("chat".to_string()),
+            );
         }
-        if let Some(effort) = reasoning_effort {
-            args.entry("reasoning_effort".to_string()).or_insert(effort);
-        }
-
-        // The raw `thinking` payload has been folded into `chat_template_args`;
-        // drop it so it isn't double-shipped downstream (and so it can't be
-        // re-interpreted with different precedence by the worker preprocessor).
-        self.thinking = None;
         Ok(())
     }
+
+    /// True when the request already expressed a thinking preference — via the
+    /// top-level `thinking` field or any of the recognized `chat_template_args`
+    /// toggles. Used to avoid overriding an explicit client choice with the
+    /// server-side default.
+    fn has_explicit_thinking_signal(&self) -> bool {
+        if self.thinking.is_some() {
+            return true;
+        }
+        if let Some(args) = self.chat_template_args.as_ref() {
+            const THINKING_KEYS: [&str; 3] = ["thinking", "enable_thinking", "thinking_mode"];
+            return THINKING_KEYS.iter().any(|key| args.contains_key(*key));
+        }
+        false
+    }
+}
+
+/// Whether to default reasoning OFF for requests that don't specify a thinking
+/// preference. Controlled by `DYN_DEFAULT_THINKING`: `false`/`off`/`0`/`no`
+/// enables default-off; unset or any truthy value leaves the per-model formatter
+/// default unchanged. Cached on first read (env is fixed at process start).
+fn default_thinking_off_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("DYN_DEFAULT_THINKING")
+            .ok()
+            .map(|raw| {
+                matches!(
+                    raw.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "off" | "no" | "disable" | "disabled"
+                )
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn openai_thinking_enabled(value: &serde_json::Value) -> anyhow::Result<Option<bool>> {
@@ -978,5 +1041,70 @@ mod tests {
                 serde_json::from_value(json_str).expect("Failed to deserialize request");
             assert!(request.normalize_reasoning_template_args().is_err());
         }
+    }
+
+    fn deserialize_request(value: serde_json::Value) -> NvCreateChatCompletionRequest {
+        serde_json::from_value(value).expect("Failed to deserialize request")
+    }
+
+    fn bare_request() -> NvCreateChatCompletionRequest {
+        deserialize_request(json!({
+            "model": "deepseek-ai/DeepSeek-V4-Pro",
+            "messages": [{"role": "user", "content": "Hello"}]
+        }))
+    }
+
+    #[test]
+    fn test_default_thinking_off_injects_chat_when_unspecified() {
+        let mut request = bare_request();
+        request
+            .normalize_reasoning_template_args_with_default(true)
+            .expect("normalize should succeed");
+        let args = request
+            .chat_template_args
+            .as_ref()
+            .expect("chat_template_args should be populated");
+        assert_eq!(args.get("thinking_mode"), Some(&json!("chat")));
+    }
+
+    #[test]
+    fn test_default_thinking_off_disabled_leaves_request_untouched() {
+        let mut request = bare_request();
+        request
+            .normalize_reasoning_template_args_with_default(false)
+            .expect("normalize should succeed");
+        assert!(request.chat_template_args.is_none());
+    }
+
+    #[test]
+    fn test_default_thinking_off_respects_explicit_client_choice() {
+        // Explicit top-level thinking=enabled must win over the server default.
+        let mut request = deserialize_request(json!({
+            "model": "deepseek-ai/DeepSeek-V4-Pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "thinking": {"type": "enabled"}
+        }));
+        request
+            .normalize_reasoning_template_args_with_default(true)
+            .expect("normalize should succeed");
+        let args = request
+            .chat_template_args
+            .as_ref()
+            .expect("chat_template_args should be populated");
+        assert_eq!(args.get("thinking"), Some(&json!(true)));
+        assert_eq!(args.get("thinking_mode"), None);
+
+        // Explicit chat_template_kwargs.enable_thinking=true is likewise honored.
+        let mut request = deserialize_request(json!({
+            "model": "deepseek-ai/DeepSeek-V4-Pro",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "chat_template_kwargs": {"enable_thinking": true}
+        }));
+        request
+            .normalize_reasoning_template_args_with_default(true)
+            .expect("normalize should succeed");
+        let args = request.chat_template_args.as_ref().unwrap();
+        assert_eq!(args.get("enable_thinking"), Some(&json!(true)));
+        assert_eq!(args.get("thinking_mode"), None);
     }
 }
