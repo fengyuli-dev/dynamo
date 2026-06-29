@@ -2892,8 +2892,20 @@ impl
         let request_id = context.id().to_string();
         let original_stream_flag = request.inner.stream.unwrap_or(false);
 
-        // Build audit handle (None if no DYN_AUDIT_SINKS)
-        let mut audit_handle = crate::audit::handle::create_handle(&request, &request_id);
+        // Build audit handle (None if no DYN_AUDIT_SINKS). When the otel sink is
+        // active, pull the HTTP request headers the entrypoint stashed in the
+        // context so the OTLP record can carry (redacted) header attributes.
+        let audit_http_headers = if crate::audit::config::otel_sink_capture_enabled() {
+            context
+                .get::<crate::audit::handle::AuditHttpRequestHeaders>(
+                    crate::audit::handle::OTEL_HTTP_HEADERS_CONTEXT_KEY,
+                )
+                .ok()
+        } else {
+            None
+        };
+        let mut audit_handle =
+            crate::audit::handle::create_handle(&request, &request_id, audit_http_headers);
 
         if let Some(ref mut h) = audit_handle {
             h.set_request(std::sync::Arc::new(request.clone()));

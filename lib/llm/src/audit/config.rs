@@ -11,6 +11,7 @@ const DEFAULT_CAPACITY: usize = 1024;
 const DEFAULT_JSONL_BUFFER_BYTES: usize = 1024 * 1024;
 const DEFAULT_JSONL_FLUSH_INTERVAL_MS: u64 = 1000;
 const DEFAULT_JSONL_GZ_ROLL_BYTES: u64 = 256 * 1024 * 1024;
+const DEFAULT_OTEL_MAX_PAYLOAD_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct AuditPolicy {
@@ -23,6 +24,7 @@ pub struct AuditPolicy {
     pub jsonl_flush_interval_ms: u64,
     pub jsonl_gz_roll_bytes: u64,
     pub jsonl_gz_roll_lines: Option<u64>,
+    pub otel_max_payload_bytes: usize,
 }
 
 static POLICY: OnceLock<AuditPolicy> = OnceLock::new();
@@ -59,6 +61,11 @@ fn load_from_env() -> AuditPolicy {
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0);
+    let otel_max_payload_bytes = std::env::var(env_audit::DYN_AUDIT_OTEL_MAX_PAYLOAD_BYTES)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_OTEL_MAX_PAYLOAD_BYTES);
 
     AuditPolicy {
         enabled: !sinks.is_empty(),
@@ -73,9 +80,18 @@ fn load_from_env() -> AuditPolicy {
         jsonl_flush_interval_ms,
         jsonl_gz_roll_bytes,
         jsonl_gz_roll_lines,
+        otel_max_payload_bytes,
     }
 }
 
 pub fn policy() -> &'static AuditPolicy {
     POLICY.get_or_init(load_from_env)
+}
+
+/// True when audit is enabled and the `otel` sink is selected. Gates the
+/// HTTP-request-header capture work (clone + context insert) in the HTTP layer
+/// so it only runs when those headers will actually be exported by the OTLP sink.
+pub fn otel_sink_capture_enabled() -> bool {
+    let policy = policy();
+    policy.enabled && policy.sinks.iter().any(|sink| sink == "otel")
 }

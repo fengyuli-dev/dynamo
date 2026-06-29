@@ -19,12 +19,16 @@ use super::{
     bus,
     config::{self, AuditPolicy},
     handle::AuditRecord,
+    otel_sink::OtelSink,
 };
 
 #[async_trait]
 pub trait AuditSink: Send + Sync {
     fn name(&self) -> &'static str;
     async fn emit(&self, rec: &AuditRecord);
+    /// Called once after the worker drains on shutdown. Sinks that buffer
+    /// (e.g. the OTLP batch exporter) flush here; the default is a no-op.
+    async fn shutdown(&self) {}
 }
 
 pub struct StderrSink;
@@ -194,6 +198,10 @@ async fn parse_sinks_from_env() -> anyhow::Result<Vec<Arc<dyn AuditSink>>> {
                     Arc::new(JsonlGzipAuditSink::from_policy(policy).await?);
                 out.push(sink);
             }
+            "otel" => {
+                let sink: Arc<dyn AuditSink> = Arc::new(OtelSink::from_policy(policy).await?);
+                out.push(sink);
+            }
             other => tracing::warn!(%other, "audit: unknown sink ignored"),
         }
     }
@@ -228,6 +236,7 @@ pub async fn spawn_workers_from_env(shutdown: CancellationToken) -> anyhow::Resu
                                 ) => break,
                             }
                         }
+                        sink.shutdown().await;
                         return;
                     }
                     msg = rx.recv() => {
@@ -243,6 +252,7 @@ pub async fn spawn_workers_from_env(shutdown: CancellationToken) -> anyhow::Resu
                     }
                 }
             }
+            sink.shutdown().await;
         });
     }
     tracing::info!(sinks = sink_count, "Audit sinks ready");
@@ -268,6 +278,7 @@ mod tests {
             model: "test-model".to_string(),
             request: None,
             response: None,
+            otel_http_headers: None,
         }
     }
 

@@ -383,8 +383,8 @@ pub mod llm {
     /// Audit sink configuration
     pub mod audit {
         /// Audit sink selection. Comma-separated values: `stderr`, `nats`,
-        /// `jsonl`, `jsonl_gz`. Setting any non-empty value enables audit
-        /// recording.
+        /// `jsonl`, `jsonl_gz`, `otel`. Setting any non-empty value enables
+        /// audit recording.
         pub const DYN_AUDIT_SINKS: &str = "DYN_AUDIT_SINKS";
 
         /// Force audit emission even when the request `store` flag is `false`.
@@ -413,6 +413,15 @@ pub mod llm {
 
         /// Rotating gzip JSONL audit sink roll threshold in record lines.
         pub const DYN_AUDIT_JSONL_GZ_ROLL_LINES: &str = "DYN_AUDIT_JSONL_GZ_ROLL_LINES";
+
+        /// Max serialized audit payload size (bytes) the OTLP sink will export;
+        /// larger records are replaced by an incomplete-marker record.
+        pub const DYN_AUDIT_OTEL_MAX_PAYLOAD_BYTES: &str = "DYN_AUDIT_OTEL_MAX_PAYLOAD_BYTES";
+
+        /// Comma/space-separated extra HTTP header names the OTLP audit sink
+        /// redacts (added to the built-in sensitive-header list).
+        pub const DYN_AUDIT_OTEL_HTTP_HEADER_REDACT_LIST: &str =
+            "DYN_AUDIT_OTEL_HTTP_HEADER_REDACT_LIST";
     }
 
     /// Per-request replay trace configuration
@@ -714,6 +723,8 @@ mod tests {
             llm::audit::DYN_AUDIT_JSONL_FLUSH_INTERVAL_MS,
             llm::audit::DYN_AUDIT_JSONL_GZ_ROLL_BYTES,
             llm::audit::DYN_AUDIT_JSONL_GZ_ROLL_LINES,
+            llm::audit::DYN_AUDIT_OTEL_MAX_PAYLOAD_BYTES,
+            llm::audit::DYN_AUDIT_OTEL_HTTP_HEADER_REDACT_LIST,
             llm::request_trace::DYN_REQUEST_TRACE,
             llm::request_trace::DYN_REQUEST_TRACE_SINKS,
             llm::request_trace::DYN_REQUEST_TRACE_OUTPUT_PATH,

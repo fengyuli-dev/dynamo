@@ -162,7 +162,7 @@ mod tests {
 
                 // Emit audit record
                 let request = create_test_request("nemotron", true);
-                let mut handle = handle::create_handle(&request, "test-req-1")
+                let mut handle = handle::create_handle(&request, "test-req-1", None)
                     .expect("Failed to create audit handle");
                 handle.set_request(Arc::new(request.clone()));
                 handle.set_response(Arc::new(create_test_response("nemotron", "test response")));
@@ -219,7 +219,7 @@ mod tests {
 
                 // Request with store=true (should be audited)
                 let request_true = create_test_request("nemotron", true);
-                if let Some(mut handle) = handle::create_handle(&request_true, "store-true") {
+                if let Some(mut handle) = handle::create_handle(&request_true, "store-true", None) {
                     handle.set_request(Arc::new(request_true.clone()));
                     handle.emit();
                 }
@@ -227,7 +227,7 @@ mod tests {
                 // Request with store=false (should NOT be audited)
                 let request_false = create_test_request("nemotron", false);
                 assert!(
-                    handle::create_handle(&request_false, "store-false").is_none(),
+                    handle::create_handle(&request_false, "store-false", None).is_none(),
                     "Should not create handle when store=false"
                 );
 
