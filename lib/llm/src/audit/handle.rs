@@ -4,10 +4,34 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use axum::http::HeaderMap;
+
 use super::{bus, config};
 use crate::protocols::openai::chat_completions::{
     NvCreateChatCompletionRequest, NvCreateChatCompletionResponse,
 };
+
+/// Context key under which the HTTP layer stashes the inbound request headers
+/// for the OTLP audit sink to export. Only populated when the `otel` sink is
+/// active (see `config::otel_sink_capture_enabled`).
+pub const OTEL_HTTP_HEADERS_CONTEXT_KEY: &str = "audit.otel.http.request.headers";
+
+/// Captured inbound HTTP request headers, forwarded from the HTTP entrypoint to
+/// the audit record so the OTLP sink can attach (redacted) header attributes.
+#[derive(Clone)]
+pub struct AuditHttpRequestHeaders {
+    headers: Arc<HeaderMap>,
+}
+
+impl AuditHttpRequestHeaders {
+    pub fn new(headers: Arc<HeaderMap>) -> Self {
+        Self { headers }
+    }
+
+    pub fn headers(&self) -> &HeaderMap {
+        self.headers.as_ref()
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AuditRecord {
@@ -19,6 +43,11 @@ pub struct AuditRecord {
     pub request: Option<Arc<NvCreateChatCompletionRequest>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<Arc<NvCreateChatCompletionResponse>>,
+    /// Inbound HTTP headers captured for the OTLP sink. Never serialized into
+    /// the JSONL/NATS/stderr payloads — the otel sink injects a redacted view
+    /// into its own `payload.http.request` field.
+    #[serde(skip)]
+    pub otel_http_headers: Option<Arc<AuditHttpRequestHeaders>>,
 }
 
 pub struct AuditHandle {
@@ -27,6 +56,7 @@ pub struct AuditHandle {
     model: String,
     req_full: Option<Arc<NvCreateChatCompletionRequest>>,
     resp_full: Option<Arc<NvCreateChatCompletionResponse>>,
+    otel_http_headers: Option<Arc<AuditHttpRequestHeaders>>,
 }
 
 impl AuditHandle {
@@ -50,14 +80,25 @@ impl AuditHandle {
             model: self.model,
             request: self.req_full,
             response: self.resp_full,
+            otel_http_headers: self.otel_http_headers,
         };
         bus::publish(rec);
     }
 }
 
-pub fn create_handle(req: &NvCreateChatCompletionRequest, request_id: &str) -> Option<AuditHandle> {
+pub fn create_handle(
+    req: &NvCreateChatCompletionRequest,
+    request_id: &str,
+    otel_http_headers: Option<Arc<AuditHttpRequestHeaders>>,
+) -> Option<AuditHandle> {
     let policy = config::policy();
-    create_handle_with_config(req, request_id, policy.enabled, policy.force_logging)
+    create_handle_with_config(
+        req,
+        request_id,
+        policy.enabled,
+        policy.force_logging,
+        otel_http_headers,
+    )
 }
 
 fn create_handle_with_config(
@@ -65,6 +106,7 @@ fn create_handle_with_config(
     request_id: &str,
     enabled: bool,
     force_logging: bool,
+    otel_http_headers: Option<Arc<AuditHttpRequestHeaders>>,
 ) -> Option<AuditHandle> {
     if !enabled {
         return None;
@@ -82,6 +124,7 @@ fn create_handle_with_config(
         model,
         req_full: None,
         resp_full: None,
+        otel_http_headers,
     })
 }
 
@@ -136,7 +179,7 @@ mod tests {
     #[test]
     fn test_force_logging_bypasses_store() {
         let request = create_test_request("test-model", false);
-        let handle = create_handle_with_config(&request, "test-id", true, true);
+        let handle = create_handle_with_config(&request, "test-id", true, true, None);
 
         assert!(
             handle.is_some(),
@@ -153,6 +196,7 @@ mod tests {
             model: "test-model".to_string(),
             request: Some(Arc::new(create_test_request_with_nvext())),
             response: Some(Arc::new(create_test_response("final answer"))),
+            otel_http_headers: None,
         };
 
         let value = serde_json::to_value(record).unwrap();
