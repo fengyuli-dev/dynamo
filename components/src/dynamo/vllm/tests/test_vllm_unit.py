@@ -472,6 +472,39 @@ async def test_unified_start_returns_normalized_served_model_name(monkeypatch):
     assert config.served_model_name == served_model_name
 
 
+def test_parse_args_splits_served_model_name_into_aliases(mock_vllm_cli):
+    mock_vllm_cli(
+        "--model",
+        "Qwen/Qwen3-0.6B",
+        "--served-model-name",
+        "primary",
+        "alias-one",
+        "alias-two",
+    )
+    config = parse_args()
+    assert config.served_model_name == "primary"
+    assert config.served_model_aliases == ["alias-one", "alias-two"]
+
+
+def test_parse_args_splits_comma_packed_served_model_name(mock_vllm_cli):
+    mock_vllm_cli(
+        "--model",
+        "Qwen/Qwen3-0.6B",
+        "--served-model-name",
+        "primary,alias-one",
+        "alias-two",
+    )
+    config = parse_args()
+    assert config.served_model_name == "primary"
+    assert config.served_model_aliases == ["alias-one", "alias-two"]
+
+
+def test_parse_args_without_served_model_name_has_no_aliases(mock_vllm_cli):
+    mock_vllm_cli("--model", "Qwen/Qwen3-0.6B")
+    config = parse_args()
+    assert config.served_model_aliases == []
+
+
 def test_should_prefetch_model_for_default_load_format():
     from dynamo.vllm.main import should_prefetch_model
 

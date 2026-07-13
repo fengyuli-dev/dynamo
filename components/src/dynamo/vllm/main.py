@@ -825,6 +825,7 @@ async def register_vllm_model(
         worker_type=worker_type,
         needs=needs,
         ignore_weights=should_register_model_ignore_weights(config),
+        model_aliases=config.served_model_aliases or None,
         # Advertise the worker's LoRA slot budget on the BASE registration so the frontend
         # allocator can place adapters onto idle-but-LoRA-capable workers before any adapter is
         # loaded here. Only generative decode/aggregated workers serve the LoRA load endpoints
