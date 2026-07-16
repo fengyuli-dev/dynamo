@@ -31,6 +31,7 @@ from dynamo.sglang.capacity import (
     model_card_dp_rank_bounds,
     runtime_capacity,
 )
+from dynamo.sglang.hicache_metadata import get_deepseek_v4_mooncake_page_layout
 
 SGLANG_HICACHE_MOONCAKE_RUNTIME_KEY = "sglang_hicache_mooncake"
 SPEC_DECODE_RUNTIME_KEY = "spec_decode"
@@ -228,7 +229,9 @@ def _parse_hicache_storage_extra_config(
     return {}
 
 
-def _get_mooncake_runtime_data(server_args: ServerArgs) -> Optional[dict[str, Any]]:
+def _get_mooncake_runtime_data(
+    engine: sgl.Engine, server_args: ServerArgs
+) -> Optional[dict[str, Any]]:
     if getattr(server_args, "hicache_storage_backend", None) != "mooncake":
         return None
 
@@ -318,6 +321,7 @@ def _get_mooncake_runtime_data(server_args: ServerArgs) -> Optional[dict[str, An
         "master_metrics_port": int(
             getattr(mooncake_config, "master_metrics_port", 9003)
         ),
+        "hybrid_page_layout": get_deepseek_v4_mooncake_page_layout(engine, server_args),
     }
 
 
@@ -420,7 +424,7 @@ async def _get_runtime_config(
                 f"Failed to attach SGLang spec decode runtime metadata: {e}"
             )
 
-    mooncake_runtime_data = _get_mooncake_runtime_data(server_args)
+    mooncake_runtime_data = _get_mooncake_runtime_data(engine, server_args)
     if mooncake_runtime_data is not None:
         try:
             runtime_config.set_engine_specific(

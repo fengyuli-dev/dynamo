@@ -45,6 +45,17 @@ struct SglangHicacheMooncakeConfig {
     extra_backend_tag: Option<String>,
     master_server_address: Option<String>,
     master_metrics_port: u16,
+    #[serde(default)]
+    hybrid_page_layout: Option<HybridPageLayout>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+struct HybridPageLayout {
+    /// Objects that must exist for every page from the root of the prefix.
+    all_pages_suffixes: Vec<String>,
+    /// Objects needed only for the trailing window of a usable prefix.
+    trailing_pages_suffixes: Vec<String>,
+    trailing_page_count: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,13 +224,7 @@ impl SharedKvCache for HicacheSharedKvCache {
             .collect::<Vec<_>>();
 
         let key_presence = self.fetch_key_presence(&endpoint, &all_actual_keys).await?;
-        let page_hits = page_query_keys
-            .iter()
-            .map(|keys| {
-                keys.iter()
-                    .all(|key| key_presence.get(key).copied().unwrap_or(false))
-            })
-            .collect::<Vec<_>>();
+        let page_hits = page_hits_from_presence(&page_query_keys, &key_presence, &config);
 
         Ok(SharedCacheHits::from_hits(&page_hits))
     }
@@ -355,6 +360,15 @@ fn expand_actual_query_keys(
     let logical_key = maybe_prefix_key(logical_page_hash, config.extra_backend_tag.as_deref());
     let pp_size = config.pp_size.max(1);
 
+    if let Some(layout) = config.hybrid_page_layout.as_ref() {
+        return layout
+            .all_pages_suffixes
+            .iter()
+            .chain(layout.trailing_pages_suffixes.iter())
+            .map(|suffix| format!("{logical_key}{suffix}"))
+            .collect();
+    }
+
     if config.is_mla_model {
         return if pp_size > 1 {
             (0..pp_size)
@@ -392,6 +406,60 @@ fn expand_actual_query_keys(
     query_keys
 }
 
+fn page_hits_from_presence(
+    page_query_keys: &[Vec<String>],
+    key_presence: &HashMap<String, bool>,
+    config: &SglangHicacheMooncakeConfig,
+) -> Vec<bool> {
+    let Some(layout) = config.hybrid_page_layout.as_ref() else {
+        return page_query_keys
+            .iter()
+            .map(|keys| {
+                keys.iter()
+                    .all(|key| key_presence.get(key).copied().unwrap_or(false))
+            })
+            .collect();
+    };
+
+    let all_count = layout.all_pages_suffixes.len();
+    if all_count == 0 {
+        tracing::warn!("Hybrid Mooncake page layout has no all-pages objects");
+        return vec![false; page_query_keys.len()];
+    }
+
+    // SGLang can only restore a contiguous compressed-KV prefix.
+    let all_pages_boundary = page_query_keys
+        .iter()
+        .take_while(|keys| {
+            keys.iter()
+                .take(all_count)
+                .all(|key| key_presence.get(key).copied().unwrap_or(false))
+        })
+        .count();
+
+    let final_boundary = if layout.trailing_pages_suffixes.is_empty() {
+        all_pages_boundary
+    } else {
+        let trailing_page_count = layout.trailing_page_count.max(1) as usize;
+        (1..=all_pages_boundary)
+            .rev()
+            .find(|&prefix_len| {
+                let start = prefix_len.saturating_sub(trailing_page_count);
+                (start..prefix_len).all(|page_idx| {
+                    page_query_keys[page_idx]
+                        .iter()
+                        .skip(all_count)
+                        .all(|key| key_presence.get(key).copied().unwrap_or(false))
+                })
+            })
+            .unwrap_or(0)
+    };
+
+    (0..page_query_keys.len())
+        .map(|page_idx| page_idx < final_boundary)
+        .collect()
+}
+
 fn maybe_prefix_key(logical_key: &str, extra_backend_tag: Option<&str>) -> String {
     match extra_backend_tag.filter(|tag| !tag.is_empty()) {
         Some(prefix) => format!("{prefix}_{logical_key}"),
@@ -421,6 +489,7 @@ mod tests {
             extra_backend_tag: None,
             master_server_address: Some("127.0.0.1:50051".to_string()),
             master_metrics_port: 9003,
+            hybrid_page_layout: None,
         }
     }
 
@@ -494,6 +563,128 @@ mod tests {
 
         let query_keys = expand_actual_query_keys("hash", &config);
         assert_eq!(query_keys, vec!["hash__k"]);
+    }
+
+    #[test]
+    fn test_expand_actual_query_keys_for_deepseek_v4_hybrid_layout() {
+        let config = SglangHicacheMooncakeConfig {
+            is_mla_model: true,
+            extra_backend_tag: Some("deployment".to_string()),
+            hybrid_page_layout: Some(HybridPageLayout {
+                all_pages_suffixes: vec![
+                    "__deepseek_v4_c4".to_string(),
+                    "__deepseek_v4_c4_indexer".to_string(),
+                    "__deepseek_v4_c128".to_string(),
+                ],
+                trailing_pages_suffixes: vec![
+                    "__swa".to_string(),
+                    "__deepseek_v4_c4_state".to_string(),
+                    "__deepseek_v4_c4_indexer_state".to_string(),
+                ],
+                trailing_page_count: 1,
+            }),
+            ..mooncake_config()
+        };
+
+        assert_eq!(
+            expand_actual_query_keys("hash", &config),
+            vec![
+                "deployment_hash__deepseek_v4_c4",
+                "deployment_hash__deepseek_v4_c4_indexer",
+                "deployment_hash__deepseek_v4_c128",
+                "deployment_hash__swa",
+                "deployment_hash__deepseek_v4_c4_state",
+                "deployment_hash__deepseek_v4_c4_indexer_state",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_hybrid_page_hits_require_contiguous_kv_and_latest_trailing_state() {
+        let config = SglangHicacheMooncakeConfig {
+            hybrid_page_layout: Some(HybridPageLayout {
+                all_pages_suffixes: vec!["__kv_a".to_string(), "__kv_b".to_string()],
+                trailing_pages_suffixes: vec!["__state".to_string()],
+                trailing_page_count: 1,
+            }),
+            ..mooncake_config()
+        };
+        let page_query_keys = build_page_query_keys(
+            &["p0".to_string(), "p1".to_string(), "p2".to_string()],
+            &config,
+        );
+        let key_presence = HashMap::from([
+            ("p0__kv_a".to_string(), true),
+            ("p0__kv_b".to_string(), true),
+            ("p0__state".to_string(), true),
+            ("p1__kv_a".to_string(), true),
+            ("p1__kv_b".to_string(), true),
+            ("p1__state".to_string(), false),
+            ("p2__kv_a".to_string(), true),
+            ("p2__kv_b".to_string(), false),
+            ("p2__state".to_string(), true),
+        ]);
+
+        assert_eq!(
+            page_hits_from_presence(&page_query_keys, &key_presence, &config),
+            vec![true, false, false]
+        );
+    }
+
+    #[test]
+    fn test_hybrid_page_hits_honor_multi_page_trailing_window() {
+        let config = SglangHicacheMooncakeConfig {
+            hybrid_page_layout: Some(HybridPageLayout {
+                all_pages_suffixes: vec!["__kv".to_string()],
+                trailing_pages_suffixes: vec!["__state".to_string()],
+                trailing_page_count: 2,
+            }),
+            ..mooncake_config()
+        };
+        let page_query_keys = build_page_query_keys(
+            &[
+                "p0".to_string(),
+                "p1".to_string(),
+                "p2".to_string(),
+                "p3".to_string(),
+            ],
+            &config,
+        );
+        let key_presence = HashMap::from([
+            ("p0__kv".to_string(), true),
+            ("p0__state".to_string(), true),
+            ("p1__kv".to_string(), true),
+            ("p1__state".to_string(), true),
+            ("p2__kv".to_string(), true),
+            ("p2__state".to_string(), false),
+            ("p3__kv".to_string(), true),
+            ("p3__state".to_string(), true),
+        ]);
+
+        assert_eq!(
+            page_hits_from_presence(&page_query_keys, &key_presence, &config),
+            vec![true, true, false, false]
+        );
+    }
+
+    #[test]
+    fn test_mooncake_config_without_hybrid_layout_is_backward_compatible() {
+        let config: SglangHicacheMooncakeConfig = serde_json::from_value(json!({
+            "backend": "mooncake",
+            "page_size": 256,
+            "tp_size": 8,
+            "pp_size": 1,
+            "is_mla_model": true,
+            "is_eagle": false,
+            "tp_lcm_size": null,
+            "should_split_heads": false,
+            "extra_backend_tag": null,
+            "master_server_address": "127.0.0.1:50051",
+            "master_metrics_port": 9003
+        }))
+        .unwrap();
+
+        assert_eq!(config.hybrid_page_layout, None);
     }
 
     #[test]
