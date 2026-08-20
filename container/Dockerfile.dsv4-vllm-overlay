@@ -36,7 +36,7 @@ RUN set -eu; \
     test "$(sha256sum vllm/v1/worker/gpu/states.py | cut -d' ' -f1)" = "99418f5df43ca612ded72609fee011620b065b2cab2f249ccb387096bf4ae71a"; \
     cp -a /tmp/vllm-overlay/vllm/. vllm/; \
     test "$(sha256sum vllm/config/speculative.py | cut -d' ' -f1)" = "6d154803aaed6667b4906bdf3de5a768dd766015e03d69c87f2e969b25d8819d"; \
-    test "$(sha256sum vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py | cut -d' ' -f1)" = "bdfb1abc720dbbc71d37585f26d433ae4a2d9e8aeee65eb5eeb5e2981c9484f1"; \
+    test "$(sha256sum vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py | cut -d' ' -f1)" = "3e480cf17c72d8e2e65059e06e1800d691abe41541d0b3d9e26b089e60ee67f2"; \
     test "$(sha256sum vllm/v1/core/kv_cache_coordinator.py | cut -d' ' -f1)" = "c53e4c9f4811ebeba8d9a47646faebdc0ab2dae6438dc71a47c1452cfad42dde"; \
     test "$(sha256sum vllm/v1/core/kv_cache_utils.py | cut -d' ' -f1)" = "e61aa590ef8ad4ad6a18d839a4a7dd53a71f71bedf82ab3ae38a89eb64a73bbe"; \
     test "$(sha256sum vllm/v1/kv_cache_interface.py | cut -d' ' -f1)" = "d5d21e02d3b75dceecf1e071b239223c655d4f08a852084cfb731fdcd8b7bde8"; \
@@ -64,14 +64,14 @@ RUN set -eu; \
 ARG DYNAMO_SOURCE_SHA=57df13d89667f7133e712ba11725cd5a70652962
 ARG DYNAMO_BUILD_SHA
 ARG VLLM_SOURCE_SHA=d626108b1841888ec90aced33367149a6bbc7e4b
-ARG VLLM_PATCH_HEAD=9a1d20281dee35e391a4a21f4eba08aec806b6bd
+ARG VLLM_PATCH_HEAD=895f6076473156a1f1e33e799112bc5f77f05242
 LABEL org.opencontainers.image.source="https://github.com/ai-dynamo/dynamo" \
       org.opencontainers.image.revision="${DYNAMO_SOURCE_SHA}" \
       ai.wce.dynamo.build-sha="${DYNAMO_BUILD_SHA}" \
       ai.wce.vllm.source-sha="${VLLM_SOURCE_SHA}" \
       ai.wce.vllm.patch-head="${VLLM_PATCH_HEAD}" \
-      ai.wce.vllm.public-prs="47891,47926,51081" \
+      ai.wce.vllm.public-prs="47891,47926,51081,51886,52807-partial" \
       ai.wce.build-metadata="instanttensor-0.1.9-license=Apache-2.0;vllm-omni=removed-incompatible-unused-plugin" \
-      ai.wce.vllm.change="DSpark and OffloadingConnector correctness"
+      ai.wce.vllm.change="DSpark, OffloadingConnector retention, and sparse-load correctness"
 
 USER dynamo

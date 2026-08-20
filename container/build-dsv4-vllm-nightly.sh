@@ -5,10 +5,10 @@ workspace=/home/scratch.fengyul_coreai
 dynamo_src=${workspace}/.tmp/dynamo-dsv4-vllm-nightly-build
 vllm_src=${workspace}/.tmp/vllm-dsv4-nightly-minimal
 base_image=deepseek-vllm-nightly-dynamo-base:57df13d
-candidate_image=deepseek-vllm-nightly-dynamo:57df13d-d626108b-minimal
+candidate_image=deepseek-vllm-nightly-dynamo:57df13d-d626108b-retention
 dynamo_sha=57df13d89667f7133e712ba11725cd5a70652962
 vllm_sha=d626108b1841888ec90aced33367149a6bbc7e4b
-patch_head=9a1d20281dee35e391a4a21f4eba08aec806b6bd
+patch_head=895f6076473156a1f1e33e799112bc5f77f05242
 
 test "$(git -C "${dynamo_src}" rev-parse "${dynamo_sha}^{commit}")" = "${dynamo_sha}"
 test "$(git -C "${dynamo_src}" merge-base HEAD "${dynamo_sha}")" = "${dynamo_sha}"
@@ -52,6 +52,9 @@ import importlib.metadata as metadata
 import os
 
 from vllm.config.speculative import SpeculativeConfig
+from vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler import (
+    OffloadingConnectorScheduler,
+)
 from vllm.v1.kv_cache_interface import KVCacheGroupSpec
 from vllm.v1.kv_offload.cpu.gpu_worker import MAX_HOST_REGISTER_CHUNK_BYTES
 from vllm.v1.worker.gpu.spec_decode.dflash.speculator import (
@@ -72,6 +75,9 @@ assert hasattr(SpeculativeConfig, "has_ephemeral_draft_context")
 assert "eagle_group_is_veto_exempt" in KVCacheGroupSpec.__dataclass_fields__
 assert MAX_HOST_REGISTER_CHUNK_BYTES == 64 * 1024**3
 assert callable(shift_draft_block_tables)
+source = __import__("inspect").getsource(OffloadingConnectorScheduler)
+assert "reachable_block_mask" in source
+assert "first_fresh_gpu_block" in source
 print("SOURCE_GATE_OK", metadata.version("vllm"))
 PY
 '
