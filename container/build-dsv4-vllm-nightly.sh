@@ -59,6 +59,12 @@ from vllm.v1.worker.gpu.spec_decode.dflash.speculator import (
 )
 
 assert metadata.version("vllm")
+try:
+    metadata.version("vllm-omni")
+except metadata.PackageNotFoundError:
+    pass
+else:
+    raise AssertionError("unused incompatible vllm-omni package is still installed")
 assert os.environ["DYNAMO_COMMIT_SHA"] == (
     "57df13d89667f7133e712ba11725cd5a70652962"
 )

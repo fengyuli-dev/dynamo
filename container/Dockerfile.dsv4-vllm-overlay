@@ -3,6 +3,13 @@ FROM ${BASE_IMAGE}
 
 USER root
 
+# The current Dynamo image recipe adds vLLM-Omni 0.27.0rc1, but this text-only
+# image uses a newer immutable vLLM nightly whose plugin API is incompatible.
+# Nothing in ai-dynamo[vllm] depends on vLLM-Omni; remove the unused plugin so
+# every worker does not emit a caught import traceback during startup.
+RUN uv pip uninstall --system vllm-omni && \
+    python3 -c 'import importlib.util; assert importlib.util.find_spec("vllm_omni") is None'
+
 COPY --from=vllm_src vllm/config/speculative.py /tmp/vllm-overlay/vllm/config/speculative.py
 COPY --from=vllm_src vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py /tmp/vllm-overlay/vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py
 COPY --from=vllm_src vllm/v1/core/kv_cache_coordinator.py /tmp/vllm-overlay/vllm/v1/core/kv_cache_coordinator.py
@@ -64,7 +71,7 @@ LABEL org.opencontainers.image.source="https://github.com/ai-dynamo/dynamo" \
       ai.wce.vllm.source-sha="${VLLM_SOURCE_SHA}" \
       ai.wce.vllm.patch-head="${VLLM_PATCH_HEAD}" \
       ai.wce.vllm.public-prs="47891,47926,51081" \
-      ai.wce.build-metadata="instanttensor-0.1.9-license=Apache-2.0" \
+      ai.wce.build-metadata="instanttensor-0.1.9-license=Apache-2.0;vllm-omni=removed-incompatible-unused-plugin" \
       ai.wce.vllm.change="DSpark and OffloadingConnector correctness"
 
 USER dynamo
