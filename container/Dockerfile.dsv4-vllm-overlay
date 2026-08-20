@@ -1,0 +1,70 @@
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+
+USER root
+
+COPY --from=vllm_src vllm/config/speculative.py /tmp/vllm-overlay/vllm/config/speculative.py
+COPY --from=vllm_src vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py /tmp/vllm-overlay/vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py
+COPY --from=vllm_src vllm/v1/core/kv_cache_coordinator.py /tmp/vllm-overlay/vllm/v1/core/kv_cache_coordinator.py
+COPY --from=vllm_src vllm/v1/core/kv_cache_utils.py /tmp/vllm-overlay/vllm/v1/core/kv_cache_utils.py
+COPY --from=vllm_src vllm/v1/kv_cache_interface.py /tmp/vllm-overlay/vllm/v1/kv_cache_interface.py
+COPY --from=vllm_src vllm/v1/kv_offload/cpu/gpu_worker.py /tmp/vllm-overlay/vllm/v1/kv_offload/cpu/gpu_worker.py
+COPY --from=vllm_src vllm/v1/kv_offload/cpu/shared_offload_region.py /tmp/vllm-overlay/vllm/v1/kv_offload/cpu/shared_offload_region.py
+COPY --from=vllm_src vllm/v1/worker/gpu/model_runner.py /tmp/vllm-overlay/vllm/v1/worker/gpu/model_runner.py
+COPY --from=vllm_src vllm/v1/worker/gpu/spec_decode/dflash/speculator.py /tmp/vllm-overlay/vllm/v1/worker/gpu/spec_decode/dflash/speculator.py
+COPY --from=vllm_src vllm/v1/worker/gpu/states.py /tmp/vllm-overlay/vllm/v1/worker/gpu/states.py
+
+RUN set -eu; \
+    SITE="$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"; \
+    cd "${SITE}"; \
+    test "$(sha256sum vllm/config/speculative.py | cut -d' ' -f1)" = "6784d4b5e99e7e8be1ea6360f76c32e80283658b8ade1937aae99e874f80a1f5"; \
+    test "$(sha256sum vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py | cut -d' ' -f1)" = "616e7fd4cb0d09064cbc4d5735f607b37964c6be3b81e26de00d5913e0a9a3e3"; \
+    test "$(sha256sum vllm/v1/core/kv_cache_coordinator.py | cut -d' ' -f1)" = "37be4bb55d40d78e2210b28c0a3f55e1027872af21335de5ca3c61f09c3856af"; \
+    test "$(sha256sum vllm/v1/core/kv_cache_utils.py | cut -d' ' -f1)" = "267e26ca5fc60fd2ca01e031635143bfd51a95aae6d301a8f10bfa35571ae42f"; \
+    test "$(sha256sum vllm/v1/kv_cache_interface.py | cut -d' ' -f1)" = "e01a4897009d659d362512c26c870865792d1efe176e34b3f236f77d7692fe94"; \
+    test "$(sha256sum vllm/v1/kv_offload/cpu/gpu_worker.py | cut -d' ' -f1)" = "5105d0455682704e93c69e7f21554e0ec959225484af000184c1014456dd095a"; \
+    test "$(sha256sum vllm/v1/kv_offload/cpu/shared_offload_region.py | cut -d' ' -f1)" = "f891d0289838306d67264c182142a9dc38f5f419c72d7fa378f6a79a772da305"; \
+    test "$(sha256sum vllm/v1/worker/gpu/model_runner.py | cut -d' ' -f1)" = "6e33b9ac040a1afd8cf80242401fd488cc0fd75be14f4b1d75e8e2d12d98b960"; \
+    test "$(sha256sum vllm/v1/worker/gpu/spec_decode/dflash/speculator.py | cut -d' ' -f1)" = "a8f03bbe5ff5d6719bb99c07bfc83b766ead3e9b42ad792f382c939e1b1d56fd"; \
+    test "$(sha256sum vllm/v1/worker/gpu/states.py | cut -d' ' -f1)" = "99418f5df43ca612ded72609fee011620b065b2cab2f249ccb387096bf4ae71a"; \
+    cp -a /tmp/vllm-overlay/vllm/. vllm/; \
+    test "$(sha256sum vllm/config/speculative.py | cut -d' ' -f1)" = "6d154803aaed6667b4906bdf3de5a768dd766015e03d69c87f2e969b25d8819d"; \
+    test "$(sha256sum vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py | cut -d' ' -f1)" = "bdfb1abc720dbbc71d37585f26d433ae4a2d9e8aeee65eb5eeb5e2981c9484f1"; \
+    test "$(sha256sum vllm/v1/core/kv_cache_coordinator.py | cut -d' ' -f1)" = "c53e4c9f4811ebeba8d9a47646faebdc0ab2dae6438dc71a47c1452cfad42dde"; \
+    test "$(sha256sum vllm/v1/core/kv_cache_utils.py | cut -d' ' -f1)" = "e61aa590ef8ad4ad6a18d839a4a7dd53a71f71bedf82ab3ae38a89eb64a73bbe"; \
+    test "$(sha256sum vllm/v1/kv_cache_interface.py | cut -d' ' -f1)" = "d5d21e02d3b75dceecf1e071b239223c655d4f08a852084cfb731fdcd8b7bde8"; \
+    test "$(sha256sum vllm/v1/kv_offload/cpu/gpu_worker.py | cut -d' ' -f1)" = "6bd3f78669f451343d8b05d57a05b9bcbfdbf8b27fcfcd4196a51f3d046c7d12"; \
+    test "$(sha256sum vllm/v1/kv_offload/cpu/shared_offload_region.py | cut -d' ' -f1)" = "c9cb0ad5f2eebfbd2b48a06b9a1c9d5d51ee04b211abd36e9ddab308616434a2"; \
+    test "$(sha256sum vllm/v1/worker/gpu/model_runner.py | cut -d' ' -f1)" = "e67637e3b4ee6fb5f5ed1e5eba31c6ead23c2165d91c1e9da796e7990b4e586e"; \
+    test "$(sha256sum vllm/v1/worker/gpu/spec_decode/dflash/speculator.py | cut -d' ' -f1)" = "64c8aab174bb129c0cd60f250f6ca2b77e8b6e98a51b06b17296e9b06b0b76c2"; \
+    test "$(sha256sum vllm/v1/worker/gpu/states.py | cut -d' ' -f1)" = "4680e6241940610364e2e92f4347da9d0622c900adfdf39bc75a75fe7138b2af"; \
+    python3 -m py_compile \
+      vllm/config/speculative.py \
+      vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py \
+      vllm/v1/core/kv_cache_coordinator.py \
+      vllm/v1/core/kv_cache_utils.py \
+      vllm/v1/kv_cache_interface.py \
+      vllm/v1/kv_offload/cpu/gpu_worker.py \
+      vllm/v1/kv_offload/cpu/shared_offload_region.py \
+      vllm/v1/worker/gpu/model_runner.py \
+      vllm/v1/worker/gpu/spec_decode/dflash/speculator.py \
+      vllm/v1/worker/gpu/states.py; \
+    grep -a -q "eagle_group_is_veto_exempt" vllm/v1/core/__pycache__/kv_cache_coordinator*.pyc; \
+    grep -a -q "shift_draft_block_tables" vllm/v1/worker/gpu/spec_decode/dflash/__pycache__/speculator*.pyc; \
+    grep -a -q "MAX_HOST_REGISTER_CHUNK_BYTES" vllm/v1/kv_offload/cpu/__pycache__/gpu_worker*.pyc; \
+    rm -rf /tmp/vllm-overlay
+
+ARG DYNAMO_SOURCE_SHA=57df13d89667f7133e712ba11725cd5a70652962
+ARG DYNAMO_BUILD_SHA
+ARG VLLM_SOURCE_SHA=d626108b1841888ec90aced33367149a6bbc7e4b
+ARG VLLM_PATCH_HEAD=9a1d20281dee35e391a4a21f4eba08aec806b6bd
+LABEL org.opencontainers.image.source="https://github.com/ai-dynamo/dynamo" \
+      org.opencontainers.image.revision="${DYNAMO_SOURCE_SHA}" \
+      ai.wce.dynamo.build-sha="${DYNAMO_BUILD_SHA}" \
+      ai.wce.vllm.source-sha="${VLLM_SOURCE_SHA}" \
+      ai.wce.vllm.patch-head="${VLLM_PATCH_HEAD}" \
+      ai.wce.vllm.public-prs="47891,47926,51081" \
+      ai.wce.build-metadata="instanttensor-0.1.9-license=Apache-2.0" \
+      ai.wce.vllm.change="DSpark and OffloadingConnector correctness"
+
+USER dynamo

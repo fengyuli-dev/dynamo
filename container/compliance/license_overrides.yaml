@@ -395,6 +395,11 @@ overrides:
   - { ecosystem: python, name: triton,                    license: "MIT",       source: "OpenAI Triton — https://github.com/openai/triton/blob/main/LICENSE" }
   - { ecosystem: python, name: vsa,                       license: "Apache-2.0",  source: "vsa (visual self-attention, sglang component) — Apache-2.0" }
 
+  # --- vLLM nightly Python dependency with a full license body in METADATA ---
+  # The conservative parser intentionally does not infer SPDX IDs from long
+  # free-form bodies. The wheel bundles the same Apache-2.0 LICENSE as upstream.
+  - { ecosystem: python, name: instanttensor,             license: "Apache-2.0", source: "InstantTensor — https://github.com/scitix/InstantTensor/blob/main/LICENSE (Apache-2.0; also bundled in the 0.1.9 wheel)" }
+
   # --- Sglang cuda12.9 — Go module additions (UNKNOWN from syft) ---
   # All well-known projects; syft can't run go-license-detector against
   # compiled binaries so license comes back UNKNOWN.
